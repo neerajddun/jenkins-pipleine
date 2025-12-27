@@ -1,0 +1,57 @@
+pipeline {
+
+    agent any
+
+    tools {
+        maven "Maven 3.9.12"
+        jdk "JDK17"
+    }
+
+    environment {
+        IMAGE_NAME = "${JOB_NAME}:v1.${BUILD_ID}"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                sh 'mvn -B clean test'
+            }
+        }
+
+        stage('Package') {
+            steps {
+                sh 'mvn -B package -DskipTests'
+            }
+            post {
+                success {
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                    docker build -t ${IMAGE_NAME} .
+                    docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Build completed successfully ✔"
+        }
+        failure {
+            echo "Build failed ❌"
+        }
+    }
+}
