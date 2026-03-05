@@ -14,13 +14,13 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                checkout scm 
+                checkout scm
             }
         }
 
-        stage('Build & Test') {
+        stage('Build and Test') {
             steps {
-                sh 'mvn -B clean test'
+                sh 'mvn clean test'
             }
         }
 
@@ -38,8 +38,19 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh """
-                    docker build -t ${IMAGE_NAME} .
-                    docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
+                docker build -t ${IMAGE_NAME} .
+                docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
+                """
+            }
+        }
+
+        stage('Deploy to Minikube') {
+            steps {
+                sh """
+                kubectl set image deployment/myapp myapp=${IMAGE_NAME} --namespace=default || \
+                kubectl create deployment myapp --image=${IMAGE_NAME}
+
+                kubectl expose deployment myapp --type=NodePort --port=8080 --name=myapp-service || true
                 """
             }
         }
