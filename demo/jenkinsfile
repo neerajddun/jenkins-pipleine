@@ -3,6 +3,11 @@ pipeline {
     agent {
         docker {
             image 'maven:3.9.10-eclipse-temurin-17'
+            args '''-v /var/run/docker.sock:/var/run/docker.sock \
+                    -v /root/.m2:/root/.m2 \
+                    -v /root/.kube:/root/.kube \
+                    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
+                    -u root'''
         }
     }
 
@@ -34,7 +39,8 @@ pipeline {
             }
             post {
                 success {
-                    archiveArtifacts artifacts: 'demo/target/*.jar', fingerprint: true
+                    archiveArtifacts artifacts: 'demo/target/*.jar',
+                                     fingerprint: true
                 }
             }
         }
@@ -43,8 +49,8 @@ pipeline {
             steps {
                 dir('demo') {
                     sh """
-                    docker build -t ${IMAGE_NAME} .
-                    docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
+                        docker build -t ${IMAGE_NAME} .
+                        docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
                     """
                 }
             }
@@ -53,10 +59,32 @@ pipeline {
         stage('Deploy to Minikube') {
             steps {
                 sh """
-                kubectl set image deployment/myapp myapp=${IMAGE_NAME} --namespace=default || \
-                kubectl create deployment myapp --image=${IMAGE_NAME}
+                    kubectl version --client
+                    kubectl get nodes
 
-                kubectl expose deployment myapp --type=NodePort --port=8080 --name=myapp-service || true
+                    if kubectl get deployment myapp --namespace=default > /dev/null 2>&1; then
+                        kubectl set image deployment/myapp \
+                            myapp=${IMAGE_NAME} --namespace=default
+                    else
+                        kubectl create deployment myapp \
+                            --image=${IMAGE_NAME} --namespace=default
+                    fi
+
+                    kubectl patch deployment myapp --namespace=default \
+                        -p '{"spec":{"template":{"spec":{"containers":[{"name":"myapp","imagePullPolicy":"Never"}]}}}}'
+
+                    kubectl expose deployment myapp \
+                        --type=NodePort \
+                        --port=8080 \
+                        --name=myapp-service \
+                        --namespace=default || true
+
+                    kubectl rollout status deployment/myapp \
+                        --namespace=default \
+                        --timeout=120s
+
+                    kubectl get pods --namespace=default
+                    kubectl get svc myapp-service --namespace=default
                 """
             }
         }
@@ -65,9 +93,14 @@ pipeline {
     post {
         success {
             echo "Build completed successfully ✔"
+            echo "Image: ${IMAGE_NAME}"
         }
         failure {
             echo "Build failed ❌"
+            sh '''
+                kubectl get pods --namespace=default || true
+                kubectl get events --namespace=default --sort-by=.lastTimestamp || true
+            '''
         }
     }
 }
