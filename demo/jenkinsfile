@@ -1,17 +1,10 @@
 pipeline {
 
-    agent {
-        docker {
-            image 'maven:3.9.10-eclipse-temurin-17'
-            args '''-v /var/run/docker.sock:/var/run/docker.sock \
-                    -v /root/.m2:/root/.m2 \
-                    -v /root/.kube:/root/.kube \
-                    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
-                    -u root'''
-        }
-    }
+    agent any
 
     environment {
+        Maven 3.6.3
+        jdk17
         IMAGE_NAME = "${JOB_NAME}:v1.${BUILD_ID}"
     }
 
@@ -58,34 +51,7 @@ pipeline {
 
         stage('Deploy to Minikube') {
             steps {
-                sh """
-                    kubectl version --client
-                    kubectl get nodes
-
-                    if kubectl get deployment myapp --namespace=default > /dev/null 2>&1; then
-                        kubectl set image deployment/myapp \
-                            myapp=${IMAGE_NAME} --namespace=default
-                    else
-                        kubectl create deployment myapp \
-                            --image=${IMAGE_NAME} --namespace=default
-                    fi
-
-                    kubectl patch deployment myapp --namespace=default \
-                        -p '{"spec":{"template":{"spec":{"containers":[{"name":"myapp","imagePullPolicy":"Never"}]}}}}'
-
-                    kubectl expose deployment myapp \
-                        --type=NodePort \
-                        --port=8080 \
-                        --name=myapp-service \
-                        --namespace=default || true
-
-                    kubectl rollout status deployment/myapp \
-                        --namespace=default \
-                        --timeout=120s
-
-                    kubectl get pods --namespace=default
-                    kubectl get svc myapp-service --namespace=default
-                """
+                    echo 'Deploy'
             }
         }
     }
@@ -97,10 +63,6 @@ pipeline {
         }
         failure {
             echo "Build failed ❌"
-            sh '''
-                kubectl get pods --namespace=default || true
-                kubectl get events --namespace=default --sort-by=.lastTimestamp || true
-            '''
         }
     }
 }
