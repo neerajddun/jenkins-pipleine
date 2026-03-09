@@ -2,9 +2,12 @@ pipeline {
 
     agent any
 
+    tools {
+        maven 'Maven 3.6.3'
+        jdk 'jdk17'
+    }
     environment {
-        Maven 3.6.3
-        jdk17
+
         IMAGE_NAME = "${JOB_NAME}:v1.${BUILD_ID}"
     }
 
