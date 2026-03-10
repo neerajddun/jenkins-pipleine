@@ -9,6 +9,7 @@ pipeline {
     environment {
 
         IMAGE_NAME = "${JOB_NAME}:v1.${BUILD_ID}"
+        DOCKER_HUB_USER = neeraj91
     }
 
     stages {
@@ -62,8 +63,8 @@ pipeline {
                     )]) {
                     sh """
                           echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                          docker tag my-app:latest $DOCKER_USER/my-app:latest
-                          docker push $DOCKER_USER/my-app:latest
+                          docker tag jenkins-pipeline:v1.8 DOCKER_HUB_USER/jenkins-pipeline:v1.8
+                          docker push DOCKER_HUB_USER/jenkins-pipeline:v1.8
                           docker logout
                       """
                     }
