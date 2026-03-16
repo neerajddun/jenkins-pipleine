@@ -3,14 +3,14 @@ pipeline {
     agent any
 
     tools {
-        maven 'Maven 3.9.9'
-        jdk 'jdk17'
+        maven 'Maven 3.9.9'          // ✅
+        jdk 'jdk17'                  // ✅
     }
 
     environment {
-        IMAGE_NAME       = "${JOB_NAME}:v1.${BUILD_ID}"
-        DOCKER_HUB_USER  = 'neeraj91'
-        FULL_IMAGE       = "${DOCKER_HUB_USER}/${JOB_NAME}:v1.${BUILD_ID}"
+        IMAGE_NAME      = "${JOB_NAME}:v1.${BUILD_ID}"
+        DOCKER_HUB_USER = 'neeraj91'
+        FULL_IMAGE      = "neeraj91/${JOB_NAME}:v1.${BUILD_ID}"
     }
 
     stages {
@@ -47,8 +47,9 @@ pipeline {
             }
             post {
                 success {
-                    archiveArtifacts artifacts: 'demo/target/*.jar',
-                                     fingerprint: true
+                    archiveArtifacts \
+                    artifacts: 'demo/target/*.jar', // ✅
+                    fingerprint: true
                 }
             }
         }
@@ -61,7 +62,8 @@ pipeline {
                 dir('demo') {
                     sh """
                         docker build -t ${IMAGE_NAME} .
-                        docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
+                        docker tag ${IMAGE_NAME} \
+                        ${JOB_NAME}:latest
                         echo "✅ Docker image built!"
                     """
                 }
@@ -80,30 +82,30 @@ pipeline {
                 )]) {
                     sh """
                         echo "$DOCKER_PASS" | \
-                        docker login -u "$DOCKER_USER" \
+                        docker login \
+                        -u "$DOCKER_USER" \
                         --password-stdin
 
                         docker tag ${IMAGE_NAME} \
-                        ${DOCKER_HUB_USER}/${IMAGE_NAME}
+                        ${FULL_IMAGE}
 
-                        docker push \
-                        ${DOCKER_HUB_USER}/${IMAGE_NAME}
+                        docker push ${FULL_IMAGE}
 
                         docker logout
-                        echo "✅ Image pushed to DockerHub!"
+                        echo "✅ Image pushed!"
                     """
                 }
             }
         }
 
         // ─────────────────────────
-        // Stage 6: Update K8s YAML
+        // Stage 6: Update K8s YAML ✅ Fixed!
         // ─────────────────────────
         stage('Update K8s Manifest') {
             steps {
                 sh """
-                    # Update image in deployment.yaml
-                    sed -i 's|image:.*|image: ${DOCKER_HUB_USER}/${IMAGE_NAME}|g' \
+                    sed -i \
+                    's|image:.*|image: ${FULL_IMAGE}|g' \
                     k8s/deployment.yaml
 
                     echo "✅ deployment.yaml updated!"
@@ -113,7 +115,7 @@ pipeline {
         }
 
         // ─────────────────────────
-        // Stage 7: Deploy to Minikube
+        // Stage 7: Deploy to Minikube ✅
         // ─────────────────────────
         stage('Deploy to Minikube') {
             steps {
@@ -122,25 +124,26 @@ pipeline {
                     variable: 'KUBECONFIG'
                 )]) {
                     sh """
-                        # Apply deployment
-                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply \
+                        -f k8s/deployment.yaml \
+                        --validate=false
 
-                        # Apply service
-                        kubectl apply -f k8s/service.yaml
+                        kubectl apply \
+                        -f k8s/service.yaml \
+                        --validate=false
 
-                        # Wait for rollout
                         kubectl rollout status \
                         deployment/demo-app \
                         --timeout=120s
 
-                        echo "✅ Deployed to Minikube!"
+                        echo "✅ Deployed!"
                     """
                 }
             }
         }
 
         // ─────────────────────────
-        // Stage 8: Verify
+        // Stage 8: Verify ✅
         // ─────────────────────────
         stage('Verify Deployment') {
             steps {
@@ -150,7 +153,8 @@ pipeline {
                 )]) {
                     sh """
                         echo "=== Pods ==="
-                        kubectl get pods -l app=demo-app
+                        kubectl get pods \
+                        -l app=demo-app
 
                         echo "=== Service ==="
                         kubectl get svc demo-app-svc
@@ -165,20 +169,22 @@ pipeline {
         }
     }
 
+    // ─────────────────────────
+    // Post Actions ✅
+    // ─────────────────────────
     post {
         success {
             echo "✅ Pipeline SUCCESS!"
-            echo "Image: ${DOCKER_HUB_USER}/${IMAGE_NAME}"
+            echo "Image: ${FULL_IMAGE}"
             echo "App deployed to Minikube!"
         }
         failure {
             echo "❌ Pipeline FAILED!"
         }
         always {
-            // Clean up local images
             sh """
                 docker rmi ${IMAGE_NAME} || true
-                docker rmi ${DOCKER_HUB_USER}/${IMAGE_NAME} || true
+                docker rmi ${FULL_IMAGE} || true
             """
             cleanWs()
         }
