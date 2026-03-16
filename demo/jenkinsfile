@@ -6,20 +6,28 @@ pipeline {
         maven 'Maven 3.6.3'
         jdk 'jdk17'
     }
-    environment {
 
-        IMAGE_NAME = "${JOB_NAME}:v1.${BUILD_ID}"
-        DOCKER_HUB_USER = 'neeraj91'
+    environment {
+        IMAGE_NAME       = "${JOB_NAME}:v1.${BUILD_ID}"
+        DOCKER_HUB_USER  = 'neeraj91'
+        FULL_IMAGE       = "${DOCKER_HUB_USER}/${JOB_NAME}:v1.${BUILD_ID}"
     }
 
     stages {
 
+        // ─────────────────────────
+        // Stage 1: Checkout
+        // ─────────────────────────
         stage('Checkout') {
             steps {
                 checkout scm
+                echo "✅ Code checked out!"
             }
         }
 
+        // ─────────────────────────
+        // Stage 2: Build and Test
+        // ─────────────────────────
         stage('Build and Test') {
             steps {
                 dir('demo') {
@@ -28,6 +36,9 @@ pipeline {
             }
         }
 
+        // ─────────────────────────
+        // Stage 3: Package
+        // ─────────────────────────
         stage('Package') {
             steps {
                 dir('demo') {
@@ -42,50 +53,134 @@ pipeline {
             }
         }
 
+        // ─────────────────────────
+        // Stage 4: Build Docker Image
+        // ─────────────────────────
         stage('Build Docker Image') {
             steps {
                 dir('demo') {
                     sh """
                         docker build -t ${IMAGE_NAME} .
                         docker tag ${IMAGE_NAME} ${JOB_NAME}:latest
+                        echo "✅ Docker image built!"
                     """
                 }
             }
         }
 
-        stage ('Docker Image Push') {
+        // ─────────────────────────
+        // Stage 5: Docker Push
+        // ─────────────────────────
+        stage('Docker Image Push') {
             steps {
-                dir('demo') {
-                    withCredentials([usernamePassword(
+                withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-credentials',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
-                    )]) {
+                )]) {
                     sh """
-                          echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                          docker tag ${IMAGE_NAME} ${DOCKER_HUB_USER}/${IMAGE_NAME}
-                          docker push ${DOCKER_HUB_USER}/${IMAGE_NAME}
-                          docker logout
-                      """
-                    }
+                        echo "$DOCKER_PASS" | \
+                        docker login -u "$DOCKER_USER" \
+                        --password-stdin
+
+                        docker tag ${IMAGE_NAME} \
+                        ${DOCKER_HUB_USER}/${IMAGE_NAME}
+
+                        docker push \
+                        ${DOCKER_HUB_USER}/${IMAGE_NAME}
+
+                        docker logout
+                        echo "✅ Image pushed to DockerHub!"
+                    """
                 }
-            }  
+            }
         }
 
+        // ─────────────────────────
+        // Stage 6: Update K8s YAML
+        // ─────────────────────────
+        stage('Update K8s Manifest') {
+            steps {
+                sh """
+                    # Update image in deployment.yaml
+                    sed -i 's|image:.*|image: ${DOCKER_HUB_USER}/${IMAGE_NAME}|g' \
+                    k8s/deployment.yaml
+
+                    echo "✅ deployment.yaml updated!"
+                    cat k8s/deployment.yaml
+                """
+            }
+        }
+
+        // ─────────────────────────
+        // Stage 7: Deploy to Minikube
+        // ─────────────────────────
         stage('Deploy to Minikube') {
             steps {
-                    echo 'Deploy'
+                withCredentials([file(
+                    credentialsId: 'kubeconfig',
+                    variable: 'KUBECONFIG'
+                )]) {
+                    sh """
+                        # Apply deployment
+                        kubectl apply -f k8s/deployment.yaml
+
+                        # Apply service
+                        kubectl apply -f k8s/service.yaml
+
+                        # Wait for rollout
+                        kubectl rollout status \
+                        deployment/demo-app \
+                        --timeout=120s
+
+                        echo "✅ Deployed to Minikube!"
+                    """
+                }
+            }
+        }
+
+        // ─────────────────────────
+        // Stage 8: Verify
+        // ─────────────────────────
+        stage('Verify Deployment') {
+            steps {
+                withCredentials([file(
+                    credentialsId: 'kubeconfig',
+                    variable: 'KUBECONFIG'
+                )]) {
+                    sh """
+                        echo "=== Pods ==="
+                        kubectl get pods -l app=demo-app
+
+                        echo "=== Service ==="
+                        kubectl get svc demo-app-svc
+
+                        echo "=== Deployment ==="
+                        kubectl get deployment demo-app
+
+                        echo "✅ Verification done!"
+                    """
+                }
             }
         }
     }
 
     post {
         success {
-            echo "Build completed successfully ✔"
-            echo "Image: ${IMAGE_NAME}"
+            echo "✅ Pipeline SUCCESS!"
+            echo "Image: ${DOCKER_HUB_USER}/${IMAGE_NAME}"
+            echo "App deployed to Minikube!"
         }
         failure {
-            echo "Build failed ❌"
+            echo "❌ Pipeline FAILED!"
+        }
+        always {
+            // Clean up local images
+            sh """
+                docker rmi ${IMAGE_NAME} || true
+                docker rmi ${DOCKER_HUB_USER}/${IMAGE_NAME} || true
+            """
+            cleanWs()
         }
     }
 }
